@@ -1,10 +1,12 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.prod.txt .
+RUN python -m pip install --upgrade pip \
+ && python -m pip install --no-cache-dir --index-url https://pypi.org/simple -r requirements.prod.txt \
+ && python -c "import redis; import redis.asyncio; print(redis.__version__)"
 
 COPY app ./app
 
