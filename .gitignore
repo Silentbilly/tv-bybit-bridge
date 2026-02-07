@@ -1,0 +1,53 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Packaging / tooling ---
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Secrets / config ---
+.env
+.env.*
+!.env.example
+
+# --- Docker ---
+docker-compose.override.yml
+**/docker-compose.override.yml
+
+cloudflared/*.json
+**/cloudflared/*.json
+
+# --- Redis data ---
+*.rdb
+dump.rdb
+redis_data/
+data/

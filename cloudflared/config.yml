@@ -1,0 +1,7 @@
+tunnel: tv-bybit-bridge
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: tvbridge.ferrynow.app
+    service: http://api:8000
+  - service: http_status:404
