@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     default_qty: str = "0.5"
     symbol_qty_map: str = "{}"
     symbol_whitelist: str = ""
+
+    # Разрешать ли вход, если позиция уже открыта
     enter_if_position_open: bool = False
 
     # Dedup (from .env)
@@ -20,6 +22,10 @@ class Settings(BaseSettings):
     dedup_ttl_exit_sec: int = 604800       # 7 days
     dedup_ttl_default_sec: int = 86400     # 24 hours
     dedup_prefix: str = "dedup:tv"
+
+    # Маппинг тикеров TV → Bybit, JSON-строка
+    # пример в .env: {"PEPEUSDT":"1000PEPEUSDT"}
+    tv_to_bybit_symbol_map: str = "{}"
 
     def qty_for(self, symbol: str) -> str:
         m = json.loads(self.symbol_qty_map or "{}")
@@ -30,6 +36,18 @@ class Settings(BaseSettings):
             return True
         allowed = {s.strip() for s in self.symbol_whitelist.split(",") if s.strip()}
         return symbol in allowed
+
+    def map_symbol(self, tv_symbol: str) -> str:
+        """
+        TV symbol (после нормализации) -> биржевой символ.
+        Например: PEPEUSDT -> 1000PEPEUSDT.
+        """
+        try:
+            m = json.loads(self.tv_to_bybit_symbol_map or "{}")
+        except json.JSONDecodeError:
+            m = {}
+        s = str(tv_symbol or "").upper().strip()
+        return str(m.get(s, s))
 
     class Config:
         env_file = ".env"
