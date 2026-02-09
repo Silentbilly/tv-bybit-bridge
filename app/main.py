@@ -25,6 +25,14 @@ app = FastAPI(title="TradingView → Bybit (entries + soft-exit)", lifespan=life
 
 @app.post("/tv/webhook")
 async def tv_webhook(payload: TVPayload, request: Request):
+    act_raw = payload.action
+    act = (act_raw or "").upper().strip()
+
+    print({"action_raw": act_raw, "action_norm": act})
+
+    if not act:
+        return {"ok": True, "ignored": True, "reason": "empty_action"}
+
     # 1. Безопасность и allowlist
     if payload.key != settings.tv_webhook_secret:
         raise HTTPException(status_code=401, detail="bad key")
