@@ -25,14 +25,6 @@ app = FastAPI(title="TradingView → Bybit (entries + soft-exit)", lifespan=life
 
 @app.post("/tv/webhook")
 async def tv_webhook(payload: TVPayload, request: Request):
-    act_raw = payload.action
-    act = (act_raw or "").upper().strip()
-
-    print({"action_raw": act_raw, "action_norm": act})
-
-    if not act:
-        return {"ok": True, "ignored": True, "reason": "empty_action"}
-
     # 1. Безопасность и allowlist
     if payload.key != settings.tv_webhook_secret:
         raise HTTPException(status_code=401, detail="bad key")
@@ -40,32 +32,32 @@ async def tv_webhook(payload: TVPayload, request: Request):
     if not settings.allowed(payload.symbol):
         raise HTTPException(status_code=403, detail="symbol not allowed")
 
-    # 2. Dedup по (action, symbol, bar_index|time)
-    r: Redis = request.app.state.redis
-    uniq_event = str(payload.bar_index) if payload.bar_index is not None else (payload.time or "")
-    if not uniq_event:
-        raise HTTPException(status_code=400, detail="bar_index or time required for dedup")
+    # 2. Нормализуем action
+    act = (payload.action or "").upper().strip()
+    if not act:
+        return {"ok": True, "ignored": True, "reason": "empty_action"}
 
-    k = dedup_key(payload.action, payload.symbol, uniq_event)
-    ttl = ttl_for_action(payload.action)
+    # 3. Dedup по (action, symbol, time)
+    r: Redis = request.app.state.redis
+    uniq_event = payload.time or ""
+    if not uniq_event:
+        raise HTTPException(status_code=400, detail="time required for dedup")
+
+    k = dedup_key(act, payload.symbol, uniq_event)
+    ttl = ttl_for_action(act)
     if not await dedup_once(r, k, ttl):
         return {"ok": True, "dedup": True}
 
     bybit: BybitV5 = request.app.state.bybit
 
-    # Нормализуем action для удобства
-    act = (payload.action or "").upper().strip()
-
-    # 3. Soft-exit (как было)
+    # 4. Soft-exit по SOFT_EXIT_*
     if act in ("SOFT_EXIT_LONG", "SOFT_EXIT_SHORT"):
         res = await bybit.close_position_market_reduce_only(payload.symbol)
-        return {"ok": True, "bybit": res}
+        return {"ok": True, "bybit": res, "action": act}
 
-    # 4. Входы: поддерживаем ENTER_* и BUY/SELL из {{strategy.order.action}}
-    #    - ENTER_LONG / BUY  -> LONG
-    #    - ENTER_SHORT / SELL -> SHORT
-    is_long_enter = act in ("ENTER_LONG", "BUY")
-    is_short_enter = act in ("ENTER_SHORT", "SELL")
+    # 5. Входы: ENTER_LONG / ENTER_SHORT из {{strategy.order.alert_message}}
+    is_long_enter = act == "ENTER_LONG"
+    is_short_enter = act == "ENTER_SHORT"
 
     if is_long_enter or is_short_enter:
         direction = "LONG" if is_long_enter else "SHORT"
@@ -98,7 +90,7 @@ async def tv_webhook(payload: TVPayload, request: Request):
         qty = settings.qty_for(payload.symbol)
         qty = await bybit.normalize_qty(payload.symbol, qty)
         open_res = await bybit.open_position_market(payload.symbol, direction=direction, qty=qty)
-        return {"ok": True, "opened": open_res, "qty": qty, "direction": direction}
+        return {"ok": True, "opened": open_res, "qty": qty, "direction": direction, "action": act}
 
-    # 5. Всё остальное игнорируем
+    # 6. Всё остальное игнорируем
     return {"ok": True, "ignored": True, "action": act}
