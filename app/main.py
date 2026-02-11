@@ -59,9 +59,10 @@ async def tv_webhook(payload: TVPayload, request: Request):
         res = await bybit.close_position_market_reduce_only(symbol)
         return {"ok": True, "bybit": res, "action": act, "symbol": symbol}
 
+    # todo: correct buy-sell after a month testing in TV script. And here. Or maybe not
     # 6. Входы: ENTER_LONG / ENTER_SHORT из {{strategy.order.alert_message}}
-    is_long_enter = act == "ENTER_LONG"
-    is_short_enter = act == "ENTER_SHORT"
+    is_long_enter = act == "buy"
+    is_short_enter = act == "sell"
 
     if is_long_enter or is_short_enter:
         direction = "LONG" if is_long_enter else "SHORT"
