@@ -1,5 +1,4 @@
 tunnel: tv-bybit-bridge
-credentials-file: /etc/cloudflared/credentials.json
 
 ingress:
   - hostname: tvbridge.ferrynow.app

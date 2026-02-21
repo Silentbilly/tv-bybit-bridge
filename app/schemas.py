@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 
 
 class TVPayload(BaseModel):
@@ -9,6 +9,18 @@ class TVPayload(BaseModel):
     time: str | None = None
     bar_index: str | int | None = None
     price: str | float | None = None
+
+    # NEW: SL/TP prices from Pine
+    sl: str | float | None = None
+    tp: str | float | None = None
+
+    @field_validator("sl", "tp", mode="before")
+    @classmethod
+    def normalize_price_fields(cls, v: object):
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
 
     @field_validator("key", mode="before")
     @classmethod

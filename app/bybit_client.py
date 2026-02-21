@@ -5,34 +5,37 @@ import hmac
 import hashlib
 import json
 import httpx
-from typing import Any
+from typing import Any, Tuple
 from .config import settings
-
 
 def _sign(prehash: str, secret: str) -> str:
     return hmac.new(secret.encode(), prehash.encode(), hashlib.sha256).hexdigest()
-
 
 class BybitV5:
     def __init__(self) -> None:
         self.base_url = settings.bybit_base_url.rstrip("/")
         self.key = settings.bybit_api_key
         self.secret = settings.bybit_api_secret
-
-        # One shared client = connection pooling / keep-alive [page:11]
         self.client = httpx.AsyncClient(
             timeout=httpx.Timeout(10.0),
             headers={"Content-Type": "application/json"},
         )
 
     async def aclose(self) -> None:
-        await self.client.aclose()  # explicit close is supported [page:11]
+        await self.client.aclose()
 
     async def _request(self, method: str, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         ts = str(int(time.time() * 1000))
         recv_window = "5000"
         params = params or {}
         url = self.base_url + path
+
+        def _rl_meta(resp: httpx.Response) -> dict[str, Any]:
+            return {
+                "x_bapi_limit": resp.headers.get("X-Bapi-Limit"),
+                "x_bapi_limit_status": resp.headers.get("X-Bapi-Limit-Status"),
+                "x_bapi_limit_reset_ts": resp.headers.get("X-Bapi-Limit-Reset-Timestamp"),
+            }
 
         if method.upper() == "GET":
             query = "&".join([f"{k}={params[k]}" for k in sorted(params.keys())])
@@ -46,7 +49,9 @@ class BybitV5:
             }
             r = await self.client.get(url, params=params, headers=headers)
             r.raise_for_status()
-            return r.json()
+            data = r.json()
+            data["_rl"] = _rl_meta(r)
+            return data
 
         body = json.dumps(params, separators=(",", ":"))
         prehash = ts + self.key + recv_window + body
@@ -59,11 +64,10 @@ class BybitV5:
         }
         r = await self.client.post(url, content=body, headers=headers)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        data["_rl"] = _rl_meta(r)
+        return data
 
-    # ----------------------------
-    # Positions (single source)
-    # ----------------------------
     async def get_position(self, symbol: str) -> dict:
         data = await self._request("GET", "/v5/position/list", {"category": "linear", "symbol": symbol})
         lst = (data.get("result") or {}).get("list") or []
@@ -79,13 +83,15 @@ class BybitV5:
         pos = await self.get_position(symbol)
         return self._side_size_from_pos(pos)
 
-    async def get_position_size(self, symbol: str) -> float:
-        _, size = await self.get_position_side_size(symbol)
-        return size
+    async def wait_position_open(self, symbol: str, desired_side: str, attempts: int = 12, delay_sec: float = 0.25) -> tuple[bool, dict]:
+        for _ in range(attempts):
+            pos = await self.get_position(symbol)
+            side, size = self._side_size_from_pos(pos)
+            if side == desired_side and size > 0:
+                return True, pos
+            await asyncio.sleep(delay_sec)
+        return False, {}
 
-    # ----------------------------
-    # Orders
-    # ----------------------------
     async def place_market(self, symbol: str, side: str, qty: str, reduce_only: bool = False) -> dict:
         return await self._request("POST", "/v5/order/create", {
             "category": "linear",
@@ -123,9 +129,33 @@ class BybitV5:
             await asyncio.sleep(delay_sec)
         return False
 
-    # ----------------------------
-    # Qty normalization
-    # ----------------------------
+    # NEW: set TP/SL for linear position (Full mode, Market only in Full) [Bybit docs]
+    async def set_trading_stop_full_linear(
+        self,
+        symbol: str,
+        take_profit: str | None,
+        stop_loss: str | None,
+        tp_trigger_by: str = "LastPrice",
+        sl_trigger_by: str = "LastPrice",
+        position_idx: int = 0,
+    ) -> dict:
+        params: dict[str, Any] = {
+            "category": "linear",
+            "symbol": symbol,
+            "tpslMode": "Full",
+            "positionIdx": int(position_idx),
+            "tpOrderType": "Market",
+            "slOrderType": "Market",
+            "tpTriggerBy": tp_trigger_by,
+            "slTriggerBy": sl_trigger_by,
+        }
+        if take_profit is not None:
+            params["takeProfit"] = str(take_profit)
+        if stop_loss is not None:
+            params["stopLoss"] = str(stop_loss)
+
+        return await self._request("POST", "/v5/position/trading-stop", params)
+
     async def get_instrument_filters(self, symbol: str) -> tuple[float, float]:
         data = await self._request("GET", "/v5/market/instruments-info", {
             "category": "linear",
