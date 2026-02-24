@@ -63,6 +63,52 @@ async def tv_webhook(payload: TVPayload, request: Request):
         res = await bybit.close_position_market_reduce_only(symbol)
         return {"ok": True, "bybit": res, "action": act, "symbol": symbol}
 
+    # 5.1. Перенос стопа в безубыток (MOVE_SL_BE_*)
+    if act in ("MOVE_SL_BE_LONG", "MOVE_SL_BE_SHORT"):
+        # Новый уровень стопа обязателен
+        sl = payload.sl
+        if sl is None:
+            raise HTTPException(status_code=400, detail="sl is required for MOVE_SL_BE_*")
+
+        try:
+            sl_f = float(sl)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="sl must be numeric for MOVE_SL_BE_*")
+
+        # Проверяем, что есть открытая позиция в нужную сторону
+        cur_side, cur_size = await bybit.get_position_side_size(symbol)
+        if cur_size <= 0:
+            return {"ok": False, "error": "no_open_position_for_move_sl", "symbol": symbol}
+
+        # Для LONG позиция должна быть Buy, для SHORT — Sell (односторонний режим)
+        desired_side = "Buy" if act == "MOVE_SL_BE_LONG" else "Sell"
+        if cur_side != desired_side:
+            return {
+                "ok": False,
+                "error": "position_side_mismatch_for_move_sl",
+                "expected": desired_side,
+                "actual": cur_side,
+                "symbol": symbol,
+            }
+
+        # Обновляем только стоп-лосс, TP оставляем как есть (None)
+        tpsl_res = await bybit.set_trading_stop_full_linear(
+            symbol=symbol,
+            take_profit=None,
+            stop_loss=str(sl_f),
+            tp_trigger_by="LastPrice",
+            sl_trigger_by="LastPrice",
+            position_idx=0,
+        )
+
+        return {
+            "ok": True,
+            "action": act,
+            "symbol": symbol,
+            "new_sl": str(sl_f),
+            "tpsl": tpsl_res,
+        }
+
     # 6. Входы: ENTER_LONG / ENTER_SHORT из {{strategy.order.alert_message}}
     is_long_enter = act == "ENTER_LONG"
     is_short_enter = act == "ENTER_SHORT"
