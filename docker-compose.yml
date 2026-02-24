@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     depends_on:
       - api
-    command: tunnel --no-autoupdate run
+    command: tunnel --no-autoupdate --protocol http2 run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARED_TUNNEL_TOKEN}
 
