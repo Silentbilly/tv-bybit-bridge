@@ -5,11 +5,13 @@ import hmac
 import hashlib
 import json
 import httpx
-from typing import Any, Tuple
+from typing import Any
 from .config import settings
+
 
 def _sign(prehash: str, secret: str) -> str:
     return hmac.new(secret.encode(), prehash.encode(), hashlib.sha256).hexdigest()
+
 
 class BybitV5:
     def __init__(self) -> None:
@@ -69,7 +71,12 @@ class BybitV5:
         return data
 
     async def get_position(self, symbol: str) -> dict:
-        data = await self._request("GET", "/v5/position/list", {"category": "linear", "symbol": symbol})
+        symbol = settings.map_symbol(symbol)
+        data = await self._request(
+            "GET",
+            "/v5/position/list",
+            {"category": "linear", "symbol": symbol},
+        )
         lst = (data.get("result") or {}).get("list") or []
         return lst[0] if lst else {}
 
@@ -83,7 +90,14 @@ class BybitV5:
         pos = await self.get_position(symbol)
         return self._side_size_from_pos(pos)
 
-    async def wait_position_open(self, symbol: str, desired_side: str, attempts: int = 12, delay_sec: float = 0.25) -> tuple[bool, dict]:
+    async def wait_position_open(
+        self,
+        symbol: str,
+        desired_side: str,
+        attempts: int = 12,
+        delay_sec: float = 0.25,
+    ) -> tuple[bool, dict]:
+        symbol = settings.map_symbol(symbol)
         for _ in range(attempts):
             pos = await self.get_position(symbol)
             side, size = self._side_size_from_pos(pos)
@@ -92,21 +106,34 @@ class BybitV5:
             await asyncio.sleep(delay_sec)
         return False, {}
 
-    async def place_market(self, symbol: str, side: str, qty: str, reduce_only: bool = False) -> dict:
-        return await self._request("POST", "/v5/order/create", {
-            "category": "linear",
-            "symbol": symbol,
-            "side": side,
-            "orderType": "Market",
-            "qty": str(qty),
-            "reduceOnly": bool(reduce_only),
-        })
+    async def place_market(
+        self,
+        symbol: str,
+        side: str,
+        qty: str,
+        reduce_only: bool = False,
+    ) -> dict:
+        symbol = settings.map_symbol(symbol)
+        return await self._request(
+            "POST",
+            "/v5/order/create",
+            {
+                "category": "linear",
+                "symbol": symbol,
+                "side": side,
+                "orderType": "Market",
+                "qty": str(qty),
+                "reduceOnly": bool(reduce_only),
+            },
+        )
 
     async def open_position_market(self, symbol: str, direction: str, qty: str) -> dict:
+        symbol = settings.map_symbol(symbol)
         side = "Buy" if direction == "LONG" else "Sell"
         return await self.place_market(symbol=symbol, side=side, qty=qty, reduce_only=False)
 
     async def close_position_market_reduce_only(self, symbol: str) -> dict:
+        symbol = settings.map_symbol(symbol)
         pos = await self.get_position(symbol)
         if not pos:
             return {"ok": True, "skipped": True, "reason": "no_position_data"}
@@ -116,12 +143,19 @@ class BybitV5:
             return {"ok": True, "skipped": True, "reason": "no_open_position"}
 
         close_side = "Sell" if pos_side == "Buy" else "Buy"
-        return await self.place_market(symbol=symbol, side=close_side, qty=str(size), reduce_only=True)
+        return await self.place_market(
+            symbol=symbol,
+            side=close_side,
+            qty=str(size),
+            reduce_only=True,
+        )
 
     async def close_if_open(self, symbol: str) -> dict:
+        symbol = settings.map_symbol(symbol)
         return await self.close_position_market_reduce_only(symbol)
 
     async def wait_flat(self, symbol: str, attempts: int = 10, delay_sec: float = 0.3) -> bool:
+        symbol = settings.map_symbol(symbol)
         for _ in range(attempts):
             side, size = await self.get_position_side_size(symbol)
             if not side or size == 0:
@@ -129,7 +163,7 @@ class BybitV5:
             await asyncio.sleep(delay_sec)
         return False
 
-    # NEW: set TP/SL for linear position (Full mode, Market only in Full) [Bybit docs]
+    # set TP/SL for linear position (Full mode, Market only in Full)
     async def set_trading_stop_full_linear(
         self,
         symbol: str,
@@ -139,6 +173,7 @@ class BybitV5:
         sl_trigger_by: str = "LastPrice",
         position_idx: int = 0,
     ) -> dict:
+        symbol = settings.map_symbol(symbol)
         params: dict[str, Any] = {
             "category": "linear",
             "symbol": symbol,
@@ -157,10 +192,15 @@ class BybitV5:
         return await self._request("POST", "/v5/position/trading-stop", params)
 
     async def get_instrument_filters(self, symbol: str) -> tuple[float, float]:
-        data = await self._request("GET", "/v5/market/instruments-info", {
-            "category": "linear",
-            "symbol": symbol,
-        })
+        symbol = settings.map_symbol(symbol)
+        data = await self._request(
+            "GET",
+            "/v5/market/instruments-info",
+            {
+                "category": "linear",
+                "symbol": symbol,
+            },
+        )
         lst = (data.get("result") or {}).get("list") or []
         if not lst:
             return 0.0, 0.0
@@ -170,6 +210,7 @@ class BybitV5:
         return min_qty, step
 
     async def normalize_qty(self, symbol: str, qty: str) -> str:
+        symbol = settings.map_symbol(symbol)
         q = float(qty)
         min_qty, step = await self.get_instrument_filters(symbol)
         if min_qty and q < min_qty:
