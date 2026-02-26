@@ -24,8 +24,12 @@ class Settings(BaseSettings):
     dedup_prefix: str = "dedup:tv"
 
     # Маппинг тикеров TV → Bybit, JSON-строка
-    # пример в .env: {"PEPEUSDT":"1000PEPEUSDT"}
+    # пример: {"PEPEUSDT":"1000PEPEUSDT","BONKUSDT":"1000BONKUSDT"}
     tv_to_bybit_symbol_map: str = "{}"
+
+    # Мультипликатор цены для TV → Bybit (для 1000/10000 контрактов), JSON-строка
+    # пример: {"PEPEUSDT":1000,"BONKUSDT":1000}
+    tv_to_bybit_price_mult_map: str = "{}"
 
     def qty_for(self, symbol: str) -> str:
         m = json.loads(self.symbol_qty_map or "{}")
@@ -34,8 +38,8 @@ class Settings(BaseSettings):
     def allowed(self, symbol: str) -> bool:
         if not self.symbol_whitelist:
             return True
-        allowed = {s.strip() for s in self.symbol_whitelist.split(",") if s.strip()}
-        return symbol in allowed
+        allowed = {s.strip().upper() for s in self.symbol_whitelist.split(",") if s.strip()}
+        return str(symbol or "").upper() in allowed
 
     def map_symbol(self, tv_symbol: str) -> str:
         """
@@ -46,8 +50,26 @@ class Settings(BaseSettings):
             m = json.loads(self.tv_to_bybit_symbol_map or "{}")
         except json.JSONDecodeError:
             m = {}
+
         s = str(tv_symbol or "").upper().strip()
         return str(m.get(s, s))
+
+    def price_mult(self, tv_symbol: str) -> float:
+        """
+        Мультипликатор цены для тикеров, которые маппятся на 1000/10000 контракты.
+        Если не задан — 1.
+        """
+        try:
+            m = json.loads(self.tv_to_bybit_price_mult_map or "{}")
+        except json.JSONDecodeError:
+            m = {}
+
+        s = str(tv_symbol or "").upper().strip()
+        v = m.get(s, 1)
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 1.0
 
     class Config:
         env_file = ".env"
